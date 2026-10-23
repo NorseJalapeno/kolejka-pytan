@@ -1,6 +1,7 @@
 window.FIREBASE_CONFIG = {
   apiKey: "AIzaSyDPZn3s7RHfdH3yFqhMnJGVpsODCFt47Hg",
   authDomain: "kolejka-pytan.firebaseapp.com",
+  databaseURL: "https://kolejka-pytan-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "kolejka-pytan",
   storageBucket: "kolejka-pytan.firebasestorage.app",
   messagingSenderId: "76595777191",
