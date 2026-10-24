@@ -32,12 +32,22 @@ Kamil Konieczny`.split('\n');
 const $ = id => document.getElementById(id);
 const isViewer = new URLSearchParams(location.search).get('mode') === 'viewer';
 const localKey = 'kolejka-pytan-v2';
+const SPECIAL = {
+  'break': {title:'Przerwa techniczna', icon:'🛠️', text:'Trwa krótka przerwa techniczna. Zaraz wracamy!'},
+  'no-session': {title:'Nie trwa teraz posiedzenie parlamentu', icon:'😭', text:'Niestety, w tej chwili nie odbywa się posiedzenie parlamentu. Do zobaczenia na kolejnym! 😢'},
+  'waiting': {title:'Oczekiwanie na kolejkę pytań', icon:'⏳', text:'Jeszcze chwila cierpliwości! Niedługo rozpoczynamy kolejkę pytań.'},
+  'ad-vocem': {title:'AD VOCEM !!!', icon:'🔥', text:'GORĄCO NA SALI! 🔥🔥🔥'}
+};
+function modeOf(s){return s && s.specialMode && SPECIAL[s.specialMode] ? s.specialMode : null;}
+function modeText(s,key){return s.modeTexts && typeof s.modeTexts[key]==='string' ? s.modeTexts[key] : SPECIAL[key].text;}
+
 function initial() { return {people: DEFAULT_PEOPLE, index: 0}; }
 function valid(data) {return data && Array.isArray(data.people) && data.people.every(p=>typeof p==='string') && Number.isInteger(data.index) && data.index>=0 && data.index<=data.people.length;}
 let state;try{const saved=JSON.parse(localStorage.getItem(localKey));state=valid(saved)?saved:initial();}catch{state=initial();}
 let configured=Boolean(window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.databaseURL);
 let online=false, user=null, dbFns=null, authFns=null, auth=null, queueRef=null, hasRemote=false;
 let messageTimeout;
+let editingMode = null;
 function msg(text){$('message').textContent=text;clearTimeout(messageTimeout);messageTimeout=setTimeout(()=>$('message').textContent='',5000);}
 function render(){
   const {people,index}=state;
@@ -62,6 +72,31 @@ function render(){
     const chip=document.createElement('span');chip.className='chip'+(i<index?' done':i===index?' current':'');chip.textContent=i<index?'Zadane':i===index?'W trakcie':'Oczekuje';
     row.append(nr,name,chip);list.append(row);
   });
+  const active=modeOf(state), spec=active?SPECIAL[active]:null;
+  document.body.classList.toggle('viewer-special',Boolean(isViewer&&active));
+  $('special-view').classList.toggle('hidden',!isViewer||!active);
+  $('special-banner').classList.toggle('hidden',!active||isViewer);
+  $('active-mode-tag').textContent=spec?'● '+spec.title:'● Kolejka aktywna';
+  document.querySelectorAll('.mode-choice[data-mode]').forEach(button=>{
+    button.classList.toggle('active',button.dataset.mode===active);
+    button.disabled= isViewer || (configured && (!user || !hasRemote));
+    button.setAttribute('aria-pressed',String(button.dataset.mode===active));
+  });
+  $('restore-queue').disabled=isViewer || !active || (configured && (!user || !hasRemote));
+  $('save-mode-text').disabled=isViewer || !active || (configured && (!user || !hasRemote));
+  $('mode-editor').classList.toggle('hidden',!active);
+  if(active){
+    const shown=modeText(state,active);
+    $('special-icon').textContent=spec.icon;
+    $('special-title').textContent=spec.title;
+    $('special-text').textContent=shown;
+    $('special-view').dataset.mode=active;
+    $('special-banner-icon').textContent=spec.icon;
+    $('special-banner-title').textContent=spec.title;
+    $('special-banner-text').textContent=shown;
+    if(editingMode!==active){$('mode-text').value=shown;editingMode=active;}
+    else if(document.activeElement!==$('mode-text') && $('mode-text').value!==shown){$('mode-text').value=shown;}
+  }else{editingMode=null;}
   $('mode').textContent=online?(user?'● Online · prowadzący':'● Online · podgląd'):(configured?'● Łączenie...':'● Tryb lokalny');
 }
 function saveLocal(){try{localStorage.setItem(localKey,JSON.stringify(state));}catch{}}
@@ -74,6 +109,19 @@ async function mutate(transform){
     catch(e){msg('Błąd synchronizacji: '+e.message);}
   }else{state=transform({...state,people:[...state.people]});saveLocal();render();}
 }
+document.querySelectorAll('.mode-choice[data-mode]').forEach(button=>button.addEventListener('click',()=>{
+  const key=button.dataset.mode;
+  mutate(s=>({...s,specialMode:key}));
+}));
+$('restore-queue').addEventListener('click',()=>mutate(s=>({...s,specialMode:null})));
+$('save-mode-text').addEventListener('click',async()=>{
+  const key=modeOf(state);if(!key)return;
+  const text=$('mode-text').value.trim();
+  if(!text)return msg('Komunikat nie może być pusty.');
+  await mutate(s=>({...s,modeTexts:{...(s.modeTexts||{}),[key]:text}}));
+  $('mode-message').textContent='✓ Komunikat zapisany';
+  setTimeout(()=>$('mode-message').textContent='',3500);
+});
 $('advance').addEventListener('click',()=>mutate(s=>({...s,index:Math.min(s.index+1,s.people.length)})));
 $('undo').addEventListener('click',()=>mutate(s=>({...s,index:Math.max(0,s.index-1)})));
 $('reset').addEventListener('click',()=>{if(confirm('Przywrócić całą kolejkę do początku?'))mutate(s=>({...s,index:0}));});
@@ -92,7 +140,7 @@ $('file').addEventListener('change',async e=>{
   try{const text=await file.text();const people=text.replace(/^\uFEFF/,'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     if(!people.length)return msg('Plik nie zawiera nazwisk.');
     if(!confirm(`Wczytać ${people.length} osób i zresetować aktualną kolejkę?`))return;
-    await mutate(()=>({people,index:0}));msg(`Wczytano ${people.length} osób.`);
+    await mutate(s=>({...s,people,index:0}));msg(`Wczytano ${people.length} osób.`);
   }catch(err){msg('Nie udało się wczytać pliku: '+err.message);}finally{e.target.value='';}
 });
 $('download').addEventListener('click',()=>{const blob=new Blob([state.people.join('\n')+'\n'],{type:'text/plain;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='osoby.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
