@@ -104,7 +104,7 @@ async function mutate(transform){
   if(isViewer || (configured && (!user || !hasRemote))) return msg('Zaloguj się i opublikuj kolejkę przed sterowaniem.');
   if(online && dbFns && queueRef){
     try{const result=await dbFns.runTransaction(queueRef, data=>{
-      const current=valid(data)?data:initial();return transform({people:[...current.people],index:current.index});
+      const current=valid(data)?data:initial();return transform({...current,people:[...current.people]});
     },{applyLocally:false});if(!result.committed)msg('Nie udało się zmienić kolejki.');}
     catch(e){msg('Błąd synchronizacji: '+e.message);}
   }else{state=transform({...state,people:[...state.people]});saveLocal();render();}
